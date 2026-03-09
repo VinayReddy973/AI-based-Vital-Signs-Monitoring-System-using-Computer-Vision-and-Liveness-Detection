@@ -1,20 +1,23 @@
 import streamlit as st
 import cv2
 import numpy as np
-import av
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 from collections import deque
 import time
 
-st.title("Advanced Vital Signs Monitor")
+st.title("AI Vital Signs Monitoring System")
 
-face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
+run = st.checkbox("Start Camera")
+
+frame_placeholder = st.empty()
+
+cap = None
 
 signal_buffer = deque(maxlen=300)
 bpm_history = deque(maxlen=10)
 
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
 
 def estimate_bpm(signal, fps=30):
 
@@ -29,6 +32,9 @@ def estimate_bpm(signal, fps=30):
 
     mask = (freqs > 0.7) & (freqs < 3)
 
+    if not np.any(mask):
+        return None
+
     peak = freqs[mask][np.argmax(fft[mask])]
 
     bpm = peak * 60
@@ -39,47 +45,30 @@ def estimate_bpm(signal, fps=30):
     return None
 
 
-def estimate_stress(bpm):
+if run:
 
-    if bpm is None:
-        return None
+    cap = cv2.VideoCapture(0)
 
-    if bpm < 70:
-        return "Low"
+    while run:
 
-    if bpm < 90:
-        return "Normal"
+        ret, frame = cap.read()
 
-    return "High"
+        if not ret:
+            break
 
-
-def estimate_temperature(bpm):
-
-    if bpm is None:
-        return None
-
-    return round(36.5 + (bpm-70)*0.01,2)
-
-
-class Processor(VideoProcessorBase):
-
-    def recv(self, frame):
-
-        img = frame.to_ndarray(format="bgr24")
-
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         faces = face_cascade.detectMultiScale(gray,1.3,5)
 
         for (x,y,w,h) in faces:
 
-            face = img[y:y+h, x:x+w]
+            face = frame[y:y+h, x:x+w]
 
             forehead = face[0:int(h*0.3), int(w*0.3):int(w*0.7)]
 
-            green = np.mean(forehead[:,:,1])
+            green_mean = np.mean(forehead[:,:,1])
 
-            signal_buffer.append(green)
+            signal_buffer.append(green_mean)
 
             bpm = estimate_bpm(signal_buffer)
 
@@ -88,28 +77,17 @@ class Processor(VideoProcessorBase):
 
             pulse = int(np.median(bpm_history)) if bpm_history else None
 
-            stress = estimate_stress(pulse)
-            temp = estimate_temperature(pulse)
-
-            cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
+            cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
 
             if pulse:
-                cv2.putText(img,f"Pulse: {pulse} BPM",(20,40),
-                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
+                cv2.putText(frame,
+                            f"Pulse: {pulse} BPM",
+                            (20,40),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1,
+                            (0,255,0),
+                            2)
 
-            if temp:
-                cv2.putText(img,f"Temp: {temp} C",(20,80),
-                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
+        frame_placeholder.image(frame, channels="BGR")
 
-            if stress:
-                cv2.putText(img,f"Stress: {stress}",(20,120),
-                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
-
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-
-webrtc_streamer(
-    key="monitor",
-    video_processor_factory=Processor,
-    media_stream_constraints={"video": True, "audio": False},
-)
+    cap.release()
