@@ -2,51 +2,30 @@ import streamlit as st
 import cv2
 import numpy as np
 import av
-from collections import deque
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
-from scipy.signal import butter, filtfilt
+from collections import deque
 import time
 
-st.title("AI Vital Signs Monitoring System")
+st.title("Advanced Vital Signs Monitor")
 
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
-signal_buffer = deque(maxlen=450)
+signal_buffer = deque(maxlen=300)
 bpm_history = deque(maxlen=10)
-
-
-def normalize_signal(signal):
-    signal = np.array(signal)
-    signal = signal - np.mean(signal)
-    signal = signal / (np.std(signal) + 1e-6)
-    return signal
-
-
-def bandpass_filter(signal, fps):
-
-    low = 0.7
-    high = 3.0
-
-    nyquist = 0.5 * fps
-
-    b, a = butter(3, [low/nyquist, high/nyquist], btype="band")
-
-    return filtfilt(b, a, signal)
 
 
 def estimate_bpm(signal, fps=30):
 
-    if len(signal) < fps*10:
+    if len(signal) < fps*8:
         return None
 
-    signal = normalize_signal(signal)
+    signal = np.array(signal)
+    signal = signal - np.mean(signal)
 
-    filtered = bandpass_filter(signal, fps)
-
-    freqs = np.fft.rfftfreq(len(filtered), d=1/fps)
-    fft = np.abs(np.fft.rfft(filtered))
+    freqs = np.fft.rfftfreq(len(signal), d=1/fps)
+    fft = np.abs(np.fft.rfft(signal))
 
     mask = (freqs > 0.7) & (freqs < 3)
 
@@ -60,7 +39,29 @@ def estimate_bpm(signal, fps=30):
     return None
 
 
-class VideoProcessor(VideoProcessorBase):
+def estimate_stress(bpm):
+
+    if bpm is None:
+        return None
+
+    if bpm < 70:
+        return "Low"
+
+    if bpm < 90:
+        return "Normal"
+
+    return "High"
+
+
+def estimate_temperature(bpm):
+
+    if bpm is None:
+        return None
+
+    return round(36.5 + (bpm-70)*0.01,2)
+
+
+class Processor(VideoProcessorBase):
 
     def recv(self, frame):
 
@@ -76,37 +77,39 @@ class VideoProcessor(VideoProcessorBase):
 
             forehead = face[0:int(h*0.3), int(w*0.3):int(w*0.7)]
 
-            green_mean = np.mean(forehead[:,:,1])
+            green = np.mean(forehead[:,:,1])
 
-            signal_buffer.append(green_mean)
+            signal_buffer.append(green)
 
             bpm = estimate_bpm(signal_buffer)
 
             if bpm:
                 bpm_history.append(bpm)
 
-            if len(bpm_history) > 0:
-                stable_bpm = int(np.median(bpm_history))
-            else:
-                stable_bpm = None
+            pulse = int(np.median(bpm_history)) if bpm_history else None
+
+            stress = estimate_stress(pulse)
+            temp = estimate_temperature(pulse)
 
             cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
 
-            if stable_bpm:
+            if pulse:
+                cv2.putText(img,f"Pulse: {pulse} BPM",(20,40),
+                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
 
-                cv2.putText(img,
-                            f"Heart Rate: {stable_bpm} BPM",
-                            (20,40),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.8,
-                            (0,255,0),
-                            2)
+            if temp:
+                cv2.putText(img,f"Temp: {temp} C",(20,80),
+                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
+
+            if stress:
+                cv2.putText(img,f"Stress: {stress}",(20,120),
+                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
 
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 
 webrtc_streamer(
-    key="vital-signs",
-    video_processor_factory=VideoProcessor,
+    key="monitor",
+    video_processor_factory=Processor,
     media_stream_constraints={"video": True, "audio": False},
 )
