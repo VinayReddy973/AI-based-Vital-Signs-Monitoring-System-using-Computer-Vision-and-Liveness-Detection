@@ -1,9 +1,5 @@
+streamlit
+opencv-python-headless
 numpy
-opencv-contrib-python
-matplotlib
-scikit-learn
-joblib
-pyttsx3
-gtts
-pygame
 pandas
+matplotlib
