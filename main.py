@@ -11,7 +11,7 @@ face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
-signal_buffer = deque(maxlen=300)
+signal_buffer = deque(maxlen=450)
 bpm_history = deque(maxlen=10)
 
 
@@ -41,6 +41,14 @@ def estimate_bpm(signal, fps=30):
     return None
 
 
+def estimate_temperature(bpm):
+
+    if bpm is None:
+        return None
+
+    return round(36.5 + (bpm-70)*0.01,2)
+
+
 def estimate_stress(bpm):
 
     if bpm is None:
@@ -53,14 +61,6 @@ def estimate_stress(bpm):
         return "Normal"
 
     return "High"
-
-
-def estimate_temperature(bpm):
-
-    if bpm is None:
-        return None
-
-    return round(36.5 + (bpm-70)*0.01,2)
 
 
 class Processor(VideoProcessorBase):
@@ -90,8 +90,8 @@ class Processor(VideoProcessorBase):
 
             pulse = int(np.median(bpm_history)) if bpm_history else None
 
-            stress = estimate_stress(pulse)
             temp = estimate_temperature(pulse)
+            stress = estimate_stress(pulse)
 
             cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
 
@@ -111,7 +111,7 @@ class Processor(VideoProcessorBase):
 
 
 webrtc_streamer(
-    key="vital-monitor",
+    key="vitals",
     video_processor_factory=Processor,
     media_stream_constraints={"video": True, "audio": False},
 )
