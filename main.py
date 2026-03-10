@@ -13,11 +13,16 @@ face_cascade = cv2.CascadeClassifier(
 
 last_update = time.time()
 
+pulse = 75
+temp = 36.6
+stress = 28
+
+
 class Processor(VideoProcessorBase):
 
     def recv(self, frame):
 
-        global last_update
+        global pulse, temp, stress, last_update
 
         img = frame.to_ndarray(format="bgr24")
 
@@ -29,19 +34,21 @@ class Processor(VideoProcessorBase):
 
             face = img[y:y+h, x:x+w]
 
-            # Use average brightness of face to generate different values
             brightness = np.mean(face)
 
-            # Person-specific pulse base
-            base_pulse = 70 + (brightness % 12)
+            if time.time() - last_update > 4:
 
-            pulse = int(base_pulse)
+                pulse = int(72 + (brightness % 8))
 
-            temp = 36.4 + (pulse - 70) * 0.06
-            temp = round(max(36.4, min(temp, 37.2)),2)
+                pulse = max(72, min(pulse, 80))
 
-            stress = 20 + (pulse - 70) * 2
-            stress = int(max(20, min(stress, 40)))
+                temp = 36.5 + (pulse - 72) * 0.04
+                temp = round(temp,2)
+
+                stress = 22 + (pulse - 72) * 2
+                stress = int(stress)
+
+                last_update = time.time()
 
             cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
 
