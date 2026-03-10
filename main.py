@@ -4,6 +4,7 @@ import numpy as np
 import av
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 import random
+import time
 
 st.title("AI Vital Signs Monitoring System")
 
@@ -12,48 +13,33 @@ face_cascade = cv2.CascadeClassifier(
 )
 
 pulse_value = 75
+last_update = time.time()
 
 
-# -------- Pulse --------
-def calculate_pulse():
+def update_vitals():
 
     global pulse_value
 
-    pulse_value += random.uniform(-1.5, 1.5)
+    pulse_value += random.uniform(-1, 1)
 
     pulse_value = max(70, min(pulse_value, 82))
 
-    return int(pulse_value)
-
-
-# -------- Stress --------
-def calculate_stress(pulse):
-
-    stress = 20 + (pulse - 70) * 2
-
-    stress += random.uniform(-2, 2)
-
-    stress = max(20, min(stress, 40))
-
-    return int(stress)
-
-
-# -------- Temperature --------
-def calculate_temp(pulse):
+    pulse = int(pulse_value)
 
     temp = 36.4 + (pulse - 70) * 0.06
+    temp = round(max(36.4, min(temp, 37.2)),2)
 
-    temp += random.uniform(-0.1, 0.1)
+    stress = 20 + (pulse - 70) * 2
+    stress = int(max(20, min(stress, 40)))
 
-    temp = max(36.4, min(temp, 37.2))
-
-    return round(temp, 2)
+    return pulse, temp, stress
 
 
-# -------- Video Processor --------
 class Processor(VideoProcessorBase):
 
     def recv(self, frame):
+
+        global last_update
 
         img = frame.to_ndarray(format="bgr24")
 
@@ -61,15 +47,23 @@ class Processor(VideoProcessorBase):
 
         faces = face_cascade.detectMultiScale(gray,1.3,5)
 
+        if time.time() - last_update > 3:
+
+            pulse, temp, stress = update_vitals()
+
+            last_update = time.time()
+
+            Processor.pulse = pulse
+            Processor.temp = temp
+            Processor.stress = stress
+
+        pulse = getattr(Processor,"pulse",75)
+        temp = getattr(Processor,"temp",36.6)
+        stress = getattr(Processor,"stress",28)
+
         for (x,y,w,h) in faces:
 
             cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
-
-            pulse = calculate_pulse()
-
-            temp = calculate_temp(pulse)
-
-            stress = calculate_stress(pulse)
 
             cv2.putText(img,f"Pulse: {pulse} BPM",(20,40),
                         cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
@@ -84,7 +78,7 @@ class Processor(VideoProcessorBase):
 
 
 webrtc_streamer(
-    key="vitals",
+    key="vital-monitor",
     video_processor_factory=Processor,
     media_stream_constraints={"video": True, "audio": False},
 )
