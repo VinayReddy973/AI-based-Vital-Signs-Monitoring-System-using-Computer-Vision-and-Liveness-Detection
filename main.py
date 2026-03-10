@@ -1,35 +1,36 @@
 import streamlit as st
 import cv2
 import numpy as np
-import av
-from collections import deque
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
-from scipy.signal import find_peaks
+import pandas as pd
+import time
 
 st.title("AI Vital Signs Monitoring System")
 
-st.write("Place your finger over the phone camera with flashlight ON")
+st.write("Camera based Heart Rate, Temperature and Stress Estimation")
 
-signal_buffer = deque(maxlen=300)
-bpm_history = deque(maxlen=10)
+camera = st.camera_input("Capture face")
 
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
 
-def calculate_bpm(signal, fps=30):
+# buffers
+green_values = []
+timestamps = []
 
-    if len(signal) < fps * 5:
+def estimate_pulse(green_signal, times):
+
+    if len(green_signal) < 10:
         return None
 
-    signal = np.array(signal)
+    signal = np.array(green_signal)
     signal = signal - np.mean(signal)
 
-    peaks, _ = find_peaks(signal, distance=fps/2)
+    fft = np.fft.rfft(signal)
+    freqs = np.fft.rfftfreq(len(signal), d=(times[1] - times[0]))
 
-    if len(peaks) < 2:
-        return None
-
-    intervals = np.diff(peaks) / fps
-
-    bpm = 60 / np.mean(intervals)
+    idx = np.argmax(np.abs(fft))
+    bpm = freqs[idx] * 60
 
     if 40 < bpm < 180:
         return int(bpm)
@@ -37,67 +38,58 @@ def calculate_bpm(signal, fps=30):
     return None
 
 
-def estimate_temperature(bpm):
+if camera is not None:
 
-    if bpm is None:
-        return None
+    bytes_data = camera.getvalue()
+    img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
 
-    temp = 36.5 + (bpm - 70) * 0.01
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    return round(temp, 2)
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
+    if len(faces) > 0:
 
-def estimate_stress(bpm):
+        x, y, w, h = faces[0]
 
-    if bpm is None:
-        return None
+        face = img[y:y+h, x:x+w]
 
-    if bpm < 70:
-        return "Low"
+        green = np.mean(face[:,:,1])
 
-    if bpm < 90:
-        return "Normal"
+        green_values.append(green)
+        timestamps.append(time.time())
 
-    return "High"
+        if len(green_values) > 30:
+            green_values.pop(0)
+            timestamps.pop(0)
 
+        pulse = estimate_pulse(green_values, timestamps)
 
-class Processor(VideoProcessorBase):
+        if pulse is None:
+            pulse = 72
 
-    def recv(self, frame):
+        # temperature model
+        temperature = 36.5 + (pulse - 70) * 0.01
 
-        img = frame.to_ndarray(format="bgr24")
+        # stress model
+        stress = min(1.0, (pulse - 60) / 100)
 
-        red_signal = np.mean(img[:, :, 2])
+        col1, col2, col3 = st.columns(3)
 
-        signal_buffer.append(red_signal)
+        col1.metric("Heart Rate", f"{pulse} BPM")
+        col2.metric("Temperature", f"{temperature:.2f} °C")
+        col3.metric("Stress Level", f"{stress:.2f}")
 
-        bpm = calculate_bpm(signal_buffer)
+        cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
 
-        if bpm:
-            bpm_history.append(bpm)
+        st.image(img, channels="BGR")
 
-        pulse = int(np.median(bpm_history)) if bpm_history else None
+        df = pd.DataFrame({
+            "Heart Rate":[pulse],
+            "Temperature":[temperature],
+            "Stress":[stress]
+        })
 
-        temp = estimate_temperature(pulse)
-        stress = estimate_stress(pulse)
+        st.line_chart(df)
 
-        if pulse:
-            cv2.putText(img, f"Pulse: {pulse} BPM", (20,40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0),2)
-
-        if temp:
-            cv2.putText(img, f"Temp: {temp} C", (20,80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0),2)
-
-        if stress:
-            cv2.putText(img, f"Stress: {stress}", (20,120),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0),2)
-
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-
-webrtc_streamer(
-    key="monitor",
-    video_processor_factory=Processor,
-    media_stream_constraints={"video": True, "audio": False},
-)
+    else:
+        st.warning("Face not detected")
