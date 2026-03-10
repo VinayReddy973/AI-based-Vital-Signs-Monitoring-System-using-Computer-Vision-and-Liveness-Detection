@@ -1,94 +1,75 @@
 import streamlit as st
 import cv2
 import numpy as np
-import pandas as pd
-import time
+import av
+from collections import deque
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+from scipy.signal import find_peaks
 
-st.set_page_config(page_title="AI Vital Signs Monitor", layout="wide")
+st.title("Phone Camera Heart Rate Monitor")
 
-st.title("AI Based Vital Signs Monitoring System")
+st.write("Place your finger on the phone camera with flashlight ON")
 
-st.write("Camera based Heart Rate, Temperature and Stress Detection")
+signal_buffer = deque(maxlen=300)
+time_buffer = deque(maxlen=300)
+bpm_history = deque(maxlen=10)
 
-# load face detector
-face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
 
-camera = st.camera_input("Take a picture")
+def calculate_bpm(signal, fps=30):
 
-# buffers
-green_signal = []
-timestamps = []
-
-def estimate_pulse(signal, times):
-
-    if len(signal) < 10:
-        return 72
+    if len(signal) < fps * 5:
+        return None
 
     signal = np.array(signal)
     signal = signal - np.mean(signal)
 
-    fft = np.fft.rfft(signal)
-    freqs = np.fft.rfftfreq(len(signal), d=(times[1] - times[0]))
+    peaks, _ = find_peaks(signal, distance=fps/2)
 
-    idx = np.argmax(np.abs(fft))
-    bpm = freqs[idx] * 60
+    if len(peaks) < 2:
+        return None
+
+    intervals = np.diff(peaks) / fps
+
+    bpm = 60 / np.mean(intervals)
 
     if 40 < bpm < 180:
         return int(bpm)
 
-    return 72
+    return None
 
 
-if camera is not None:
+class Processor(VideoProcessorBase):
 
-    file_bytes = np.asarray(bytearray(camera.read()), dtype=np.uint8)
-    frame = cv2.imdecode(file_bytes, 1)
+    def recv(self, frame):
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        img = frame.to_ndarray(format="bgr24")
 
-    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        red_channel = np.mean(img[:,:,2])
 
-    if len(faces) > 0:
+        signal_buffer.append(red_channel)
 
-        x, y, w, h = faces[0]
+        bpm = calculate_bpm(signal_buffer)
 
-        face = frame[y:y+h, x:x+w]
+        if bpm:
+            bpm_history.append(bpm)
 
-        green_mean = np.mean(face[:, :, 1])
+        pulse = int(np.median(bpm_history)) if bpm_history else None
 
-        green_signal.append(green_mean)
-        timestamps.append(time.time())
+        if pulse:
 
-        if len(green_signal) > 30:
-            green_signal.pop(0)
-            timestamps.pop(0)
+            cv2.putText(img,
+                        f"Pulse: {pulse} BPM",
+                        (30,50),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0,255,0),
+                        2)
 
-        pulse = estimate_pulse(green_signal, timestamps)
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-        temperature = 36.5 + (pulse - 70) * 0.01
-        stress = min(1.0, (pulse - 60) / 100)
 
-        col1, col2, col3 = st.columns(3)
-
-        col1.metric("Heart Rate (BPM)", pulse)
-        col2.metric("Temperature (°C)", round(temperature,2))
-        col3.metric("Stress Level", round(stress,2))
-
-        cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
-
-        st.image(frame, channels="BGR")
-
-        df = pd.DataFrame({
-            "Heart Rate":[pulse],
-            "Temperature":[temperature],
-            "Stress":[stress]
-        })
-
-        st.subheader("Vital Signs")
-
-        st.line_chart(df)
-
-    else:
-        st.warning("Face not detected")
+webrtc_streamer(
+    key="pulse",
+    video_processor_factory=Processor,
+    media_stream_constraints={"video": True, "audio": False},
+)
