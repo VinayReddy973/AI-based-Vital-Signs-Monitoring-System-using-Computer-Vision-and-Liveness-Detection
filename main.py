@@ -15,8 +15,6 @@ face_cascade = cv2.CascadeClassifier(
 signal_buffer = deque(maxlen=300)
 bpm_history = deque(maxlen=10)
 
-
-# ---------------- Pulse ----------------
 def calculate_bpm(signal, fps=30):
 
     if len(signal) < fps * 5:
@@ -39,31 +37,25 @@ def calculate_bpm(signal, fps=30):
     return None
 
 
-# ---------------- Temperature ----------------
 def estimate_temperature(bpm):
 
     if bpm is None:
         return None
 
-    temp = 36.5 + (bpm - 70) * 0.01
-
-    return round(temp,2)
+    return round(36.5 + (bpm - 70) * 0.01, 2)
 
 
-# ---------------- Stress Index ----------------
 def estimate_stress(bpm):
 
     if bpm is None:
         return None
 
-    stress_index = (bpm - 60) / 40
+    stress = (bpm - 60) / 40
+    stress = max(0, min(stress, 1))
 
-    stress_index = max(0, min(stress_index,1))
-
-    return round(stress_index,2)
+    return round(stress, 2)
 
 
-# ---------------- Video Processing ----------------
 class Processor(VideoProcessorBase):
 
     def recv(self, frame):
@@ -75,6 +67,8 @@ class Processor(VideoProcessorBase):
         faces = face_cascade.detectMultiScale(gray,1.3,5)
 
         for (x,y,w,h) in faces:
+
+            cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
 
             face = img[y:y+h, x:x+w]
 
@@ -93,19 +87,16 @@ class Processor(VideoProcessorBase):
 
             stress = estimate_stress(pulse)
 
-            cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
-
-            if pulse:
+            if pulse is not None:
                 cv2.putText(img,f"Pulse: {pulse} BPM",(20,40),
                             cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
 
-            if temp:
+            if temp is not None:
                 cv2.putText(img,f"Temp: {temp} C",(20,80),
                             cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
 
             if stress is not None:
-                cv2.putText(img,f"Stress Index: {stress}",
-                            (20,120),
+                cv2.putText(img,f"Stress Index: {stress}",(20,120),
                             cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
 
         return av.VideoFrame.from_ndarray(img, format="bgr24")
