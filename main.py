@@ -8,13 +8,15 @@ from scipy.signal import find_peaks
 
 st.title("AI Vital Signs Monitoring System")
 
-st.write("Place your finger on the phone camera with flashlight ON")
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
 
 signal_buffer = deque(maxlen=300)
 bpm_history = deque(maxlen=10)
 
 
-# ---------- Heart Rate ----------
+# ---------------- Pulse ----------------
 def calculate_bpm(signal, fps=30):
 
     if len(signal) < fps * 5:
@@ -29,7 +31,6 @@ def calculate_bpm(signal, fps=30):
         return None
 
     intervals = np.diff(peaks) / fps
-
     bpm = 60 / np.mean(intervals)
 
     if 40 < bpm < 180:
@@ -38,78 +39,80 @@ def calculate_bpm(signal, fps=30):
     return None
 
 
-# ---------- Temperature ----------
+# ---------------- Temperature ----------------
 def estimate_temperature(bpm):
 
     if bpm is None:
         return None
 
-    # estimated body temperature
     temp = 36.5 + (bpm - 70) * 0.01
 
-    return round(temp, 2)
+    return round(temp,2)
 
 
-# ---------- Stress ----------
+# ---------------- Stress Index ----------------
 def estimate_stress(bpm):
 
     if bpm is None:
         return None
 
-    if bpm < 65:
-        return "Low"
+    stress_index = (bpm - 60) / 40
 
-    elif bpm < 85:
-        return "Normal"
+    stress_index = max(0, min(stress_index,1))
 
-    else:
-        return "High"
+    return round(stress_index,2)
 
 
-# ---------- Video Processor ----------
+# ---------------- Video Processing ----------------
 class Processor(VideoProcessorBase):
 
     def recv(self, frame):
 
         img = frame.to_ndarray(format="bgr24")
 
-        red_signal = np.mean(img[:, :, 2])
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        signal_buffer.append(red_signal)
+        faces = face_cascade.detectMultiScale(gray,1.3,5)
 
-        bpm = calculate_bpm(signal_buffer)
+        for (x,y,w,h) in faces:
 
-        if bpm:
-            bpm_history.append(bpm)
+            face = img[y:y+h, x:x+w]
 
-        pulse = int(np.median(bpm_history)) if bpm_history else None
+            red_signal = np.mean(face[:,:,2])
 
-        temp = estimate_temperature(pulse)
-        stress = estimate_stress(pulse)
+            signal_buffer.append(red_signal)
 
-        if pulse:
-            cv2.putText(img, f"Pulse: {pulse} BPM",
-                        (20,40),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,(0,255,0),2)
+            bpm = calculate_bpm(signal_buffer)
 
-        if temp:
-            cv2.putText(img, f"Temp: {temp} C",
-                        (20,80),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,(0,255,0),2)
+            if bpm:
+                bpm_history.append(bpm)
 
-        if stress:
-            cv2.putText(img, f"Stress: {stress}",
-                        (20,120),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,(0,255,0),2)
+            pulse = int(np.median(bpm_history)) if bpm_history else None
+
+            temp = estimate_temperature(pulse)
+
+            stress = estimate_stress(pulse)
+
+            cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
+
+            if pulse:
+                cv2.putText(img,f"Pulse: {pulse} BPM",(20,40),
+                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
+
+            if temp:
+                cv2.putText(img,f"Temp: {temp} C",(20,80),
+                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
+
+            if stress is not None:
+                cv2.putText(img,f"Stress Index: {stress}",
+                            (20,120),
+                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
 
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 
 webrtc_streamer(
-    key="monitor",
+    key="vital-monitor",
     video_processor_factory=Processor,
     media_stream_constraints={"video": True, "audio": False},
 )
