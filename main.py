@@ -4,26 +4,29 @@ import numpy as np
 import pandas as pd
 import time
 
-st.title("AI Vital Signs Monitoring System")
+st.set_page_config(page_title="AI Vital Signs Monitor", layout="wide")
 
-st.write("Camera based Heart Rate, Temperature and Stress Estimation")
+st.title("AI Based Vital Signs Monitoring System")
 
-camera = st.camera_input("Capture face")
+st.write("Camera based Heart Rate, Temperature and Stress Detection")
 
+# load face detector
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
+camera = st.camera_input("Take a picture")
+
 # buffers
-green_values = []
+green_signal = []
 timestamps = []
 
-def estimate_pulse(green_signal, times):
+def estimate_pulse(signal, times):
 
-    if len(green_signal) < 10:
-        return None
+    if len(signal) < 10:
+        return 72
 
-    signal = np.array(green_signal)
+    signal = np.array(signal)
     signal = signal - np.mean(signal)
 
     fft = np.fft.rfft(signal)
@@ -35,15 +38,15 @@ def estimate_pulse(green_signal, times):
     if 40 < bpm < 180:
         return int(bpm)
 
-    return None
+    return 72
 
 
 if camera is not None:
 
-    bytes_data = camera.getvalue()
-    img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+    file_bytes = np.asarray(bytearray(camera.read()), dtype=np.uint8)
+    frame = cv2.imdecode(file_bytes, 1)
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
@@ -51,43 +54,39 @@ if camera is not None:
 
         x, y, w, h = faces[0]
 
-        face = img[y:y+h, x:x+w]
+        face = frame[y:y+h, x:x+w]
 
-        green = np.mean(face[:,:,1])
+        green_mean = np.mean(face[:, :, 1])
 
-        green_values.append(green)
+        green_signal.append(green_mean)
         timestamps.append(time.time())
 
-        if len(green_values) > 30:
-            green_values.pop(0)
+        if len(green_signal) > 30:
+            green_signal.pop(0)
             timestamps.pop(0)
 
-        pulse = estimate_pulse(green_values, timestamps)
+        pulse = estimate_pulse(green_signal, timestamps)
 
-        if pulse is None:
-            pulse = 72
-
-        # temperature model
         temperature = 36.5 + (pulse - 70) * 0.01
-
-        # stress model
         stress = min(1.0, (pulse - 60) / 100)
 
         col1, col2, col3 = st.columns(3)
 
-        col1.metric("Heart Rate", f"{pulse} BPM")
-        col2.metric("Temperature", f"{temperature:.2f} °C")
-        col3.metric("Stress Level", f"{stress:.2f}")
+        col1.metric("Heart Rate (BPM)", pulse)
+        col2.metric("Temperature (°C)", round(temperature,2))
+        col3.metric("Stress Level", round(stress,2))
 
-        cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
+        cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
 
-        st.image(img, channels="BGR")
+        st.image(frame, channels="BGR")
 
         df = pd.DataFrame({
             "Heart Rate":[pulse],
             "Temperature":[temperature],
             "Stress":[stress]
         })
+
+        st.subheader("Vital Signs")
 
         st.line_chart(df)
 
