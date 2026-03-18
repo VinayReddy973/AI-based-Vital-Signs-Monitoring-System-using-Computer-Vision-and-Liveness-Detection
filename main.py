@@ -39,14 +39,13 @@ class Processor(VideoProcessorBase):
             if time.time() - last_update > 4:
 
                 pulse = int(72 + (brightness % 8))
-
                 pulse = max(72, min(pulse, 80))
 
                 temp = 36.5 + (pulse - 72) * 0.04
                 temp = round(temp,2)
 
                 stress = 22 + (pulse - 72) * 2
-                stress = int(stress)
+                stress = round(stress / 100, 2)  # ✅ converted to decimal (0–1)
 
                 last_update = time.time()
 
