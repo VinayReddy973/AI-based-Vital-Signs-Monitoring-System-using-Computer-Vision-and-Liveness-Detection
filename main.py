@@ -16,13 +16,14 @@ last_update = time.time()
 pulse = 75
 temp = 36.6
 stress = 28
+status = "Good"
 
 
 class Processor(VideoProcessorBase):
 
     def recv(self, frame):
 
-        global pulse, temp, stress, last_update
+        global pulse, temp, stress, last_update, status
 
         img = frame.to_ndarray(format="bgr24")
 
@@ -45,7 +46,13 @@ class Processor(VideoProcessorBase):
                 temp = round(temp,2)
 
                 stress = 22 + (pulse - 72) * 2
-                stress = round(stress / 100, 2)  # ✅ converted to decimal (0–1)
+                stress = round(stress / 100, 2)
+
+                # ✅ Health status logic
+                if (72 <= pulse <= 80) and (36.5 <= temp <= 37.0) and (stress < 0.30):
+                    status = "Good"
+                else:
+                    status = "Check"
 
                 last_update = time.time()
 
@@ -58,6 +65,10 @@ class Processor(VideoProcessorBase):
                         cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
 
             cv2.putText(img,f"Stress: {stress}",(20,120),
+                        cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
+
+            # ✅ Display Health Status
+            cv2.putText(img,f"Health: {status}",(20,160),
                         cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,0),2)
 
         return av.VideoFrame.from_ndarray(img, format="bgr24")
